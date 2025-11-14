@@ -74,6 +74,8 @@ from opendrift.config import Configurable, CONFIG_LEVEL_BASIC, CONFIG_LEVEL_ADVA
 import roaring_landmask
 from roaring_landmask import RoaringLandmask
 
+from shapely.geometry import Point, LineString
+
 Mode = Enum('Mode', ['Config', 'Ready', 'Run', 'Result'])
 rl = roaring_landmask.RoaringLandmask.new()
 
@@ -1033,6 +1035,7 @@ class OpenDriftSimulation(PhysicsMethods, Timeable, Configurable):
                       number=None,
                       number_per_point=None,
                       radius_type='gaussian',
+                      poly=None, #!!! NEW
                       **kwargs):
         """Seed elements with given position(s), time and properties.
 
@@ -1152,6 +1155,23 @@ class OpenDriftSimulation(PhysicsMethods, Timeable, Configurable):
                 az = np.random.rand(np.sum(number)) * 360
                 dist = np.sqrt(np.random.uniform(0, 1,
                                                  np.sum(number))) * radius
+            #-----------------
+            # new - restrict particle "radius" to seed within the bounds of a polygon
+            elif radius_type == 'poly_uniform':
+                az = np.random.rand(np.sum(number)) * 360
+                # given an angle, find the max distance to the polygon boundary
+                # calculates the intersection point of the polygon along each seeded angle
+                # for the defined radius, and uses this to scale the distance seeding
+                centroid = poly.centroid
+                radial_pts = [Point(centroid.x + radius * np.cos(np.deg2rad((90 - a) % 360)), # angles corrected to geod reference frame (from E -> from N)
+                                    centroid.y + radius * np.sin(np.deg2rad((90 - a) % 360))) # angles corrected to geod reference frame (from E -> from N)
+                              for a in az]
+                ls = [LineString([centroid, pt]) for pt in radial_pts]
+                max_dist = np.array([centroid.distance(poly.boundary.intersection(l)) for l in ls])
+                dist = np.sqrt(np.random.uniform(0, 1,
+                                                 np.sum(number))) * max_dist # scale to max distance, instead of radius
+            #----------------
+            
             if len(lon) > 1:
                 lon, lat, az = geod.fwd(lon, lat, az, dist, radians=False)
             else:
@@ -1202,15 +1222,6 @@ class OpenDriftSimulation(PhysicsMethods, Timeable, Configurable):
                 meters_above_seafloor = 0
             kwargs['z'] = \
                 -env['sea_floor_depth_below_sea_level'].astype('float32') + meters_above_seafloor
-
-        # Getting element properties from seed config, if not specified explicitly
-        seed_config = self.get_configspec('seed:')
-        for seed_prop in seed_config:
-            prop = seed_prop.split(':')[-1]
-            if prop in kwargs:
-                continue
-            if prop in self.ElementType.variables:
-                kwargs[prop] = seed_config[f'seed:{prop}']['value']
 
         # Creating and scheduling elements
         elements = self.ElementType(lon=lon, lat=lat, **kwargs)
