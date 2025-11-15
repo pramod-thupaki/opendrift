@@ -100,7 +100,7 @@ class Reader(BaseReader, UnstructuredReader):
     ocean_depth_nele = None
     ocean_depth_node = None
 
-    def __init__(self, filename=None, name=None, proj4=None, corr_filename=None):
+    def __init__(self, filename=None, name=None, proj4=None):
         if filename is None:
             raise ValueError('Filename is missing')
         filestr = str(filename)
@@ -147,11 +147,12 @@ class Reader(BaseReader, UnstructuredReader):
         assert self.dataset['time'].time_zone == 'UTC'
         assert self.dataset['time'].units == 'days since 1858-11-17 00:00:00'
         assert self.dataset['time'].format == 'modified julian day (MJD)'
-        ref_time = datetime(1858, 11, 17, 00, 00, 00) # TODO: include , tzinfo=timezone.utc)
+        ref_time = datetime(1858, 11, 17, 00, 00,
+                            00) # TODO: include , tzinfo=timezone.utc)
         self.times = np.array([
             ref_time + timedelta(days=d.item())
             for d in self.dataset['time'][:]
-            ])
+        ])
         self.start_time = self.times[0]
         self.end_time = self.times[-1]
         # time steps are not constant
@@ -412,12 +413,10 @@ class Reader(BaseReader, UnstructuredReader):
         if self.siglay is None:
             logger.debug('Reading siglays into memory...')
             self.siglay = self.dataset['siglay'][:]
-            # self.siglay = self.dataset['siglay'].values
 
         if self.siglev is None:
             logger.debug('Reading siglevs into memory...')
             self.siglev = self.dataset['siglev'][:]
-            # self.siglev = self.dataset['siglev'].values
 
         if shp[1] == self.siglay.shape[0]:
             sigmas = self.siglay[:, nodes]
@@ -427,7 +426,6 @@ class Reader(BaseReader, UnstructuredReader):
         if self.ocean_depth_node is None:
             logger.debug('Reading ocean depth into memory...')
             self.ocean_depth_node = self.dataset['h'][:]
-            # self.ocean_depth_node = self.dataset['h'].values
 
         # Calculating depths from sigmas
         depths = self.z_from_sigma(sigmas, self.ocean_depth_node[nodes])
@@ -443,12 +441,10 @@ class Reader(BaseReader, UnstructuredReader):
         if self.siglay_center is None:
             logger.info('Reading siglay_centers into memory...')
             self.siglay_center = self.dataset['siglay_center'][:]
-            # self.siglay_center = self.dataset['siglay_center'].values
 
         if self.siglev_center is None:
             logger.info('Reading siglev_centers into memory...')
             self.siglev_center = self.dataset['siglev_center'][:]
-            # self.siglev_center = self.dataset['siglev_center'].values
 
         if shp[1] == self.siglay_center.shape[0]:
             sigmas = self.siglay_center[:, el]
@@ -458,7 +454,6 @@ class Reader(BaseReader, UnstructuredReader):
         if self.ocean_depth_nele is None:
             logger.info('Reading ocean depth center into memory...')
             self.ocean_depth_nele = self.dataset['h_center'][:]
-            # self.ocean_depth_nele = self.dataset['h_center'].values
 
         # Calculating depths from sigmas
         depths = self.z_from_sigma(sigmas, self.ocean_depth_nele[el])

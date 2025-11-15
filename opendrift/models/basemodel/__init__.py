@@ -1035,7 +1035,8 @@ class OpenDriftSimulation(PhysicsMethods, Timeable, Configurable):
                       number=None,
                       number_per_point=None,
                       radius_type='gaussian',
-                      poly=None, #!!! NEW
+                      poly=None,
+                      poly_crs=None,
                       **kwargs):
         """Seed elements with given position(s), time and properties.
 
@@ -1157,17 +1158,30 @@ class OpenDriftSimulation(PhysicsMethods, Timeable, Configurable):
                                                  np.sum(number))) * radius
             #-----------------
             # new - restrict particle "radius" to seed within the bounds of a polygon
+            # calculates the intersection point of the polygon along each seeded angle (az)
+            # for the defined radius, and uses this to scale the distance seeding from the origin
             elif radius_type == 'poly_uniform':
+                if poly_crs is None:
+                    raise ValueError("'poly_uniform' requires 'poly_crs' to be defined")
+                
+                transformer = pyproj.Transformer.from_crs("EPSG:4326", poly_crs, always_xy=True)
+                src = Point(transformer.transform(lon[0],lat[0])) # lon/lat are a repeated array of size (number,), so index 1st values only
+                
+                # check polygon overlaps seed point
+                if not poly.contains(src):
+                    raise ValueError("Seed coordinates must be within polygon boundaries")
+                # check that the radius is large enough to calculate intersection distances
+                bx,by = poly.exterior.coords.xy
+                bdist = np.max([Point(bxx,byy).distance(src) for bxx,byy in zip(bx,by)])
+                if radius<bdist:
+                    raise ValueError("Radius %s m must exceeed max distance %s m" % (radius, bdist))
+                    
                 az = np.random.rand(np.sum(number)) * 360
-                # given an angle, find the max distance to the polygon boundary
-                # calculates the intersection point of the polygon along each seeded angle
-                # for the defined radius, and uses this to scale the distance seeding
-                centroid = poly.centroid
-                radial_pts = [Point(centroid.x + radius * np.cos(np.deg2rad((90 - a) % 360)), # angles corrected to geod reference frame (from E -> from N)
-                                    centroid.y + radius * np.sin(np.deg2rad((90 - a) % 360))) # angles corrected to geod reference frame (from E -> from N)
+                radial_pts = [Point(src.x + radius * np.cos(np.deg2rad((90 - a) % 360)), # angles corrected to geod reference frame (from E -> from N)
+                                    src.y + radius * np.sin(np.deg2rad((90 - a) % 360))) # angles corrected to geod reference frame (from E -> from N)
                               for a in az]
-                ls = [LineString([centroid, pt]) for pt in radial_pts]
-                max_dist = np.array([centroid.distance(poly.boundary.intersection(l)) for l in ls])
+                ls = [LineString([src, pt]) for pt in radial_pts]
+                max_dist = np.array([src.distance(poly.boundary.intersection(l)) for l in ls])
                 dist = np.sqrt(np.random.uniform(0, 1,
                                                  np.sum(number))) * max_dist # scale to max distance, instead of radius
             #----------------
@@ -1222,7 +1236,17 @@ class OpenDriftSimulation(PhysicsMethods, Timeable, Configurable):
                 meters_above_seafloor = 0
             kwargs['z'] = \
                 -env['sea_floor_depth_below_sea_level'].astype('float32') + meters_above_seafloor
-
+        
+        # Getting element properties from seed config, if not specified explicitly
+        seed_config = self.get_configspec('seed:')
+        for seed_prop in seed_config:
+            prop = seed_prop.split(':')[-1]
+            if prop in kwargs:
+                continue
+            if prop in self.ElementType.variables:
+                kwargs[prop] = seed_config[f'seed:{prop}']['value']
+        
+        
         # Creating and scheduling elements
         elements = self.ElementType(lon=lon, lat=lat, **kwargs)
         time_array = np.array(time)
