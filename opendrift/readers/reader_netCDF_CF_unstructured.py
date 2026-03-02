@@ -25,6 +25,11 @@ import pyproj
 import logging
 logger = logging.getLogger(__name__)
 
+import shapely
+import pandas as pd
+import geopandas as gpd
+import xarray as xr
+
 from opendrift.readers.basereader import BaseReader, UnstructuredReader
 
 
@@ -55,21 +60,34 @@ class Reader(BaseReader, UnstructuredReader):
         'Northward_sea_water_velocity': 'y_sea_water_velocity',
         'eastward wind': 'x_wind',
         'northward wind': 'y_wind',
-        'ww': 'upward_sea_water_velocity',
+        #------------------
+        # 'ww': 'upward_sea_water_velocity',
+        'Upward Water Velocity': 'upward_sea_water_velocity',
+        'sea_floor_depth_below_geoid': 'sea_floor_depth_below_sea_level',
+        'sea_surface_height_above_geoid': 'sea_surface_height',
     }
 
     node_variables = [
-        'salinity',
-        'temperature',
+        # 'salinity',
+        # 'temperature',
         'sea_floor_depth_below_sea_level',
         'sea_floor_depth_below_geoid',
         'sea_surface_height_above_geoid',
+        #----------------------
+        'sea_surface_height',
+        
     ]
 
     face_variables = [
         'x_sea_water_velocity',
         'y_sea_water_velocity',
         'upward_sea_water_velocity',
+        #----------------------
+        'x_wind',
+        'y_wind',
+        'sea_water_salinity',
+        'sea_water_temperature',
+        
     ]
 
     dataset = None
@@ -102,7 +120,9 @@ class Reader(BaseReader, UnstructuredReader):
         else:
             logger.info('Opening file with Dataset')
             self.dataset = Dataset(filename, 'r')
-
+            # logger.info('Opening file with Xarray')
+            # self.dataset = xr.open_dataset(filename, decode_times=False)
+        
         if proj4 is not None:
             logger.info('Using custom projection: %s..' % proj4)
             self.proj4 = proj4
@@ -116,7 +136,7 @@ class Reader(BaseReader, UnstructuredReader):
 
         logger.info('Reading grid and coordinate variables..')
         assert self.dataset.CoordinateSystem == "Cartesian", "Only cartesian coordinate systems supported"
-
+        
         self.x = self.dataset['x'][:]
         self.y = self.dataset['y'][:]
         self.xc = self.dataset['xc'][:]
@@ -128,7 +148,7 @@ class Reader(BaseReader, UnstructuredReader):
         assert self.dataset['time'].units == 'days since 1858-11-17 00:00:00'
         assert self.dataset['time'].format == 'modified julian day (MJD)'
         ref_time = datetime(1858, 11, 17, 00, 00,
-                            00)  # TODO: include , tzinfo=timezone.utc)
+                            00) # TODO: include , tzinfo=timezone.utc)
         self.times = np.array([
             ref_time + timedelta(days=d.item())
             for d in self.dataset['time'][:]
@@ -146,8 +166,20 @@ class Reader(BaseReader, UnstructuredReader):
         for var_name in self.dataset.variables:
             # skipping coordinate variables
             if var_name in [
-                    'x', 'y', 'time', 'lon', 'lat', 'lonc', 'latc', 'siglay',
-                    'siglev', 'siglay_center', 'siglev_center'
+                    'x',
+                    'y',
+                    'time',
+                    'lon',
+                    'lat',
+                    'lonc',
+                    'latc',
+                    'siglay',
+                    'siglev',
+                    'siglay_center',
+                    'siglev_center',
+                    #----------------------
+                    # added
+                    'h_center',
             ]:
                 continue
 
@@ -160,6 +192,17 @@ class Reader(BaseReader, UnstructuredReader):
                 std_name = var.getncattr('standard_name')
                 std_name = self.variable_aliases.get(std_name, std_name)
                 self.variable_mapping[std_name] = str(var_name)
+            #---------------------------------------------------
+            # read in variables where only the "long_name" description has been defined
+            # this will enable loading the names for all variables into the reader, but only the
+            # variables listed in required_variables within the model script (ex. OceanDrift),
+            # and in the face_variables/node_variables above, will read in data
+            elif ('standard_name' not in var.ncattrs()) & ('long_name' in var.ncattrs()):
+                std_name = var.getncattr('long_name')
+                std_name = self.variable_aliases.get(std_name, std_name)
+                self.variable_mapping[std_name] = str(var_name)
+            #---------------------------------------------------
+                
 
         self.variables = list(self.variable_mapping.keys())
 
@@ -252,7 +295,7 @@ class Reader(BaseReader, UnstructuredReader):
         if len(z) == 1:
             z = z[0] * np.ones(x.shape)
 
-        logger.debug("Requested variabels: %s, lengths: %d, %d, %d" %
+        logger.debug("Requested variables: %s, lengths: %d, %d, %d" %
                      (requested_variables, len(x), len(y), len(z)))
 
         requested_variables, time, x, y, z, _outside = \
@@ -269,7 +312,7 @@ class Reader(BaseReader, UnstructuredReader):
         face_variables = [
             var for var in requested_variables if var in self.face_variables
         ]
-
+        
         assert (len(node_variables) + len(face_variables)
                 ) == len(requested_variables), "missing variables requested"
 
@@ -285,7 +328,7 @@ class Reader(BaseReader, UnstructuredReader):
                 dvar = self.variable_mapping.get(var)
                 logger.debug("Interpolating: %s (%s)" % (var, dvar))
                 dvar = self.dataset[dvar]
-
+                
                 # sigma ind depends on whether variable is defined on sigma layer og sigma level
                 if 'siglev' in dvar.dimensions:
                     sigma_ind = self.__nearest_node_sigma__(dvar, nodes, z)
@@ -300,8 +343,13 @@ class Reader(BaseReader, UnstructuredReader):
                     # Picking the nearest value
                     variables[var] = block[sigma_ind - sigma_ind.min(),
                                            nodes - nodes.min()]
+                #--------------
+                # read in time-depenedent variables where sigma is not defined
+                elif ('siglev' not in dvar.dimensions) & ('time' in dvar.dimensions):
+                    variables[var] = dvar[indx_nearest, slice(nodes.min(), nodes.max() + 1)][nodes - nodes.min()]  # 2nd indexer seems to be needed...
+                #--------------
                 else:  # no depth dimension
-                    variables[var] = dvar[slice(nodes.min(), nodes.max() + 1)]
+                    variables[var] = dvar[slice(nodes.min(), nodes.max() + 1)][nodes - nodes.min()]  # 2nd indexer seems to be needed...
 
         if face_variables:
             logger.debug("Interpolating face-variables..")
@@ -328,8 +376,14 @@ class Reader(BaseReader, UnstructuredReader):
                     # Picking the nearest value
                     variables[var] = block[sigma_ind - sigma_ind.min(),
                                            fcs - fcs.min()]
+                    # print(var, variables[var])
+                #--------------
+                # read in time-depenedent variables where sigma is not defined
+                elif ('siglay' not in dvar.dimensions) & ('time' in dvar.dimensions):
+                    variables[var] = dvar[indx_nearest, slice(fcs.min(), fcs.max() + 1)][fcs - fcs.min()] # 2nd indexer seems to be needed...
+                #--------------
                 else:  # no depth dimension
-                    variables[var] = dvar[slice(fcs.min(), fcs.max() + 1)]
+                    variables[var] = dvar[slice(fcs.min(), fcs.max() + 1)][fcs - fcs.min()] # 2nd indexer seems to be needed...
 
         return variables
 
