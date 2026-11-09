@@ -16,7 +16,7 @@ o = SedimentDrift(loglevel=20)  # Set loglevel to 0 for debug information
 
 try:
     proj = "+proj=utm +zone=9 +north +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
-    fvcom = reader_netCDF_CF_unstructured.Reader(filename = '/mnt/c/tmp/rpcages03_0001.nc', proj4 = proj)
+    fvcom = reader_netCDF_CF_unstructured.Reader(filename = '/home/thupakip/data/tmp/rpcages04_0001.nc', proj4 = proj)
     o.add_reader(fvcom)
     print(fvcom)
 except:
@@ -38,7 +38,7 @@ if fvcom is not None:
     o.set_config('drift:vertical_advection_correction', True)
     o.set_config('vertical_mixing:resuspension_threshold', resuspension_threshold)
     # o.set_config('general:seafloor_action', 'deactivate')
-    fnc = '/mnt/c/tmp/rpcages_traj_sedcore_SSp5_RW5_RS10.nc'
+    fnc = '/home/thupakip/data/tmp/opendrift-02.nc'
 
 
     o.seed_elements(lon=lon, lat=lat, radius=5, number=N,

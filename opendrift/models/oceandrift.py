@@ -18,7 +18,8 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 from scipy.interpolate import interp1d
-import logging; logger = logging.getLogger(__name__)
+import logging; logger = logging.getLogger(__name__); logger.setLevel(logging.WARNING) 
+
 from opendrift.models.basemodel import OpenDriftSimulation
 from opendrift.elements import LagrangianArray
 from opendrift.models.physics_methods import verticaldiffusivity_Large1994, verticaldiffusivity_Sundby1983
@@ -342,7 +343,7 @@ class OceanDrift(OpenDriftSimulation):
                     w_elevation = w_surface * (self.elements.z[applicable] + total_depth) / total_depth
                     w = w - w_elevation
                 else:
-                    logger.warning('vertical_advection_correction requires storing '
+                    logger.debug('vertical_advection_correction requires storing '
                                    'previous value of sea_surface_height')
 
             self.elements.z[applicable] = np.minimum(0,

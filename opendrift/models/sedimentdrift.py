@@ -24,7 +24,7 @@ import logging; logger = logging.getLogger(__name__)
 from opendrift.models.oceandrift import OceanDrift
 from opendrift.models.oceandrift import Lagrangian3DArray
 from opendrift.config import CONFIG_LEVEL_ESSENTIAL, CONFIG_LEVEL_BASIC, CONFIG_LEVEL_ADVANCED
-
+logging.basicConfig(level=logging.WARNING)
 class SedimentElement(Lagrangian3DArray):
     variables = Lagrangian3DArray.add_variables([
         ('settled', {'dtype': np.uint8,  # 0 is active, 1 is settled
@@ -111,9 +111,12 @@ class SedimentDrift(OceanDrift):
         # self.elements.moving to 0.
         # These elements will not move until eventual later resuspension.
         settling = np.logical_and(self.elements.z <= seafloor_depth, self.elements.moving==1)
+        threshold = self.get_config('vertical_mixing:resuspension_threshold')
         if np.sum(settling) > 0:
             logger.debug('Settling %s elements at seafloor' % np.sum(settling))
             self.elements.moving[settling] = 0
+            if threshold is None:
+                self.elements.activated[settling] = 1
 
     def resuspension(self):
         """Resuspending elements if current speed > .5 m/s"""
